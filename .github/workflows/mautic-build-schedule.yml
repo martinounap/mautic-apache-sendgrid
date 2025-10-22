@@ -73,9 +73,9 @@ jobs:
           pull: true
           push: true
           tags: |
-            martinounap/mautic-sendgrid:6-apache
-          cache-from: type=registry,ref=martinounap/mautic-sendgrid:buildcache-m6
-          cache-to: type=registry,ref=martinounap/mautic-sendgrid:buildcache-m6,mode=max
+            martinounap/mautic:6-apache-sendgrid
+          cache-from: type=registry,ref=martinounap/mautic:buildcache-m6
+          cache-to: type=registry,ref=martinounap/mautic:buildcache-m6,mode=max
 
       - name: Save new digest to file (locally in 'mautic-6' dir)
         if: steps.local_digest.outputs.digest != steps.remote_digest.outputs.digest
