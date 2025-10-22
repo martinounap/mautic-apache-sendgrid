@@ -1,0 +1,93 @@
+name: Build Mautic with SendGrid mailer 
+
+on:
+  schedule:
+    # Runs daily at 4:00 AM UTC
+    - cron: '0 4 * * *'
+  
+  # Allows manual triggering from the Actions tab for testing
+  workflow_dispatch:
+
+jobs:
+  # ========================================================
+  # JOB: Build Mautic 6
+  # In the future, you can copy this block for Mautic 7, etc.
+  # ========================================================
+  build_mautic_6:
+    runs-on: ubuntu-latest
+    
+    # Give the workflow permission to write to other branches
+    permissions:
+      contents: write 
+    
+    steps:
+      - name: Check out 'main' branch (for the workflow)
+        uses: actions/checkout@v4
+        with:
+          ref: 'main'
+      
+      - name: Check out 'mautic-6' branch (for config)
+        uses: actions/checkout@v4
+        with:
+          ref: 'mautic-6'
+          path: 'mautic-6'
+
+      # Install 'crane' for digest comparison
+      - name: Install crane
+        uses: imjasonh/setup-crane@v0.1
+
+      # Read the last used digest from the 'mautic-6' branch file
+      - name: Read local digest (from mautic-6 branch)
+        id: local_digest
+        run: echo "digest=$(cat mautic-6/last_base_digest.txt || true)" >> $GITHUB_OUTPUT
+
+      # 5. Read the current remote digest for Mautic 6
+      - name: Read remote digest (mautic:6-apache)
+        id: remote_digest
+        run: echo "digest=$(crane digest mautic/mautic:6-apache)" >> $GITHUB_OUTPUT
+
+      - name: Compare digests
+        run: |
+          echo "Mautic 6 Last Used Digest: ${{ steps.local_digest.outputs.digest }}"
+          echo "Mautic 6 Current Hub Digest:  ${{ steps.remote_digest.outputs.digest }}"
+
+      - name: Log in to Docker Hub
+        if: steps.local_digest.outputs.digest != steps.remote_digest.outputs.digest
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        if: steps.local_digest.outputs.digest != steps.remote_digest.outputs.digest
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push (Mautic 6)
+        if: steps.local_digest.outputs.digest != steps.remote_digest.outputs.digest
+        uses: docker/build-push-action@v5
+        with:
+          # Point to the 'mautic-6' dir for context and Dockerfile
+          context: ./mautic-6
+          file: ./mautic-6/Dockerfile
+          platforms: linux/amd64,linux/arm64          
+          pull: true
+          push: true
+          tags: |
+            martinounap/mautic-sendgrid:6-apache
+          cache-from: type=registry,ref=martinounap/mautic-sendgrid:buildcache-m6
+          cache-to: type=registry,ref=martinounap/mautic-sendgrid:buildcache-m6,mode=max
+
+      - name: Save new digest to file (locally in 'mautic-6' dir)
+        if: steps.local_digest.outputs.digest != steps.remote_digest.outputs.digest
+        run: echo "${{ steps.remote_digest.outputs.digest }}" > mautic-6/last_base_digest.txt
+
+      - name: Commit new digest to 'mautic-6' branch
+        if: steps.local_digest.outputs.digest != steps.remote_digest.outputs.digest
+        run: |
+          cd mautic-6
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          git add last_base_digest.txt
+          git commit -m "chore: Update Mautic 6 base image digest [skip ci]"
+          git push origin mautic-6
+          
